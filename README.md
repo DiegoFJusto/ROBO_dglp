@@ -1,5 +1,6 @@
 # ROBO_dglp
 == 
+
 File in bash to run Recon of Recon Collect Data and Some Scan of Vulnerabilities
 
 Copy or download the file and create in linux terminal 
@@ -20,6 +21,7 @@ Read the prerequisites and make sure you have the right tools for best performan
 If in doubt, review the code to check folder/directory names Required tools: "subfinder/anew/httpx/naabu/katana/gf/dalfox/gauplus/nuclei/ripgen/trufflehog/reconftw"
 
 == Portugues
+
 Arquivo em bash para executar Recon of Recon levantar dados e alguns Scan de Vulnerabilidades
 
 Copiar ou baixar o arquivo e criar no terminal linux
